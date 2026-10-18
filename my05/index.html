@@ -2,27 +2,51 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#241c2e">
 <title>El vinilo roto</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#241c2e;
     font-family:"Trebuchet MS",system-ui,sans-serif;-webkit-user-select:none;user-select:none;
-    -webkit-tap-highlight-color:transparent}
+    -webkit-tap-highlight-color:transparent;overscroll-behavior:none}
   canvas{display:block;touch-action:none}
   #vig{position:fixed;inset:0;pointer-events:none;
     background:radial-gradient(ellipse at center,transparent 55%,rgba(10,5,20,.55))}
   #hud{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;
-    padding:0 16px 16px;pointer-events:none}
+    padding:0 16px calc(16px + env(safe-area-inset-bottom,0px));pointer-events:none}
   #msg{background:#3a2f4acc;color:#ffe9d2;border-radius:20px;padding:10px 20px;
     font-size:17px;text-align:center;max-width:90vw}
-  #out{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;display:none;font:inherit;font-size:16px;
-    padding:10px 20px;border:0;border-radius:16px;background:#ffb36b;color:#2b2033}
+  #out{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom,0px));
+    display:none;font:inherit;font-size:16px;padding:10px 20px;border:0;border-radius:16px;
+    background:#ffb36b;color:#2b2033}
+  #fsBtn{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:calc(12px + env(safe-area-inset-right,0px));
+    width:46px;height:46px;border:0;border-radius:50%;font-size:22px;line-height:46px;padding:0;
+    background:#3a2f4acc;color:#ffe9d2;display:none;z-index:5}
+  #start{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:18px;text-align:center;padding:24px;color:#ffe9d2;
+    background:radial-gradient(ellipse at center,#4a3560 0%,#241c2e 70%)}
+  #start h1{margin:0;font-size:clamp(30px,6vw,56px);font-weight:700;letter-spacing:.5px}
+  #start p{margin:0;font-size:clamp(16px,2.4vw,22px);opacity:.85;max-width:30em}
+  #go{font:inherit;font-size:22px;padding:14px 44px;border:0;border-radius:24px;background:#ffb36b;color:#2b2033;
+    box-shadow:0 6px 0 #c98443}
+  #go:active{transform:translateY(4px);box-shadow:0 2px 0 #c98443}
+  #tip{font-size:14px;opacity:.6;max-width:26em}
 </style>
 </head>
 <body>
 <div id="vig"></div>
 <div id="hud"><div id="msg"></div></div>
 <button id="out">Sacar el disco</button>
+<button id="fsBtn" aria-label="Pantalla completa">⛶</button>
+<div id="start">
+  <h1 id="t1">El vinilo roto</h1>
+  <p id="t2">Ayúdame a repararlo, pieza por pieza.</p>
+  <button id="go">Jugar</button>
+  <div id="tip">Se abrirá en pantalla completa. Para salir, toca la ✕ de arriba a la derecha.</div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
 <script>
@@ -30,6 +54,8 @@
 const T=THREE;
 /* ======== CONFIG: aquí personalizas TODO ======== */
 const CONFIG={
+  title:'El vinilo roto',                    // título de la pantalla de inicio
+  subtitle:'Ayúdame a repararlo, pieza por pieza.',
   cover:'portada.jpg',                       // portada del álbum
   backCover:'contraportada.jpg',             // parte de atrás del álbum
   photo:'foto.jpg',                          // foto del cuadro de la mesa
@@ -41,7 +67,9 @@ const CONFIG={
             "eres el amor de mi vida,","prometo que nunca","dejará de sonar ghost town"],
   noteTrack:5                                // canción al voltear la portada (0=primera, 5=Ghost Town)
 };
-const SONGS=CONFIG.songs, trackUrl=i=>CONFIG.tracks[i];
+document.getElementById('t1').textContent=CONFIG.title;
+document.getElementById('t2').textContent=CONFIG.subtitle;
+const SONGS=CONFIG.songs;
 
 const TINT=['#8ecae6','#ffb5a7','#b8e0a8','#ffd97d','#c9b6e4','#f7a8c4','#9fd8cb'];
 const N=7, R=2.05, H=.14, BEV=.015, HH=(H+2*BEV)/2, STEP=Math.PI/4;
@@ -60,7 +88,7 @@ const scene=new T.Scene();
 scene.background=new T.Color(0x241c2e);
 scene.fog=new T.Fog(0x241c2e,26,55);
 const cam=new T.PerspectiveCamera(45,1,.5,200);
-let pr=Math.min(devicePixelRatio,2);                       // resolución (baja sola si hay lag)
+let pr=Math.min(devicePixelRatio,2);                         // resolución (baja sola si hay lag)
 const renderer=new T.WebGLRenderer({antialias:devicePixelRatio<2,powerPreference:'high-performance'});
 renderer.setPixelRatio(pr);
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=T.PCFShadowMap;
@@ -114,9 +142,8 @@ function add(geo,mat,x,y,z,cast=true,parent=scene){
 function shadows(g){g.traverse(o=>{if(o.isMesh){o.castShadow=o.receiveShadow=true;}});return g;}
 function cv(w,h,draw){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);return c;}
 function tex(c,rep){const t=new T.CanvasTexture(c);if(rep){t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(rep[0],rep[1]);}t.anisotropy=2;return t;}
-const MAXANI=renderer.capabilities.getMaxAnisotropy();
+const MAXANI=renderer.capabilities.getMaxAnisotropy();       // fotos nítidas aunque estén inclinadas
 function sharp(t){t.anisotropy=MAXANI;t.minFilter=T.LinearMipmapLinearFilter;t.magFilter=T.LinearFilter;return t;}
-
 // caja redondeada (en vez de cubos duros)
 function rbox(w,h,d,r=.15,bev=.05){
   const s=new T.Shape(),x=-w/2,y=-d/2;
@@ -247,7 +274,8 @@ const photoMat=new T.MeshBasicMaterial({color:0xe6e6e6,map:tex(cv(256,256,(x,w,h
   x.textAlign='center';x.fillText('♥',w/2,150);x.font='24px sans-serif';x.fillText('Pon tu foto aquí',w/2,205);}))});
 add(new T.PlaneGeometry(PW,PH),photoMat,0,FH/2+.05,.122,false,lean);
 add(new T.BoxGeometry(.14,FH*.7,.08),woodM,0,FH*.35,-.4,true,frameG).rotation.x=-.35;  // pata, detrás del cuadro
-new T.TextureLoader().load(CONFIG.photo,t=>{  sharp(t);                // recorta tu foto para que llene el cuadro
+new T.TextureLoader().load(CONFIG.photo,t=>{                  // recorta tu foto para que llene el cuadro
+  sharp(t);
   const fa=PW/PH, ia=t.image.width/t.image.height;
   if(ia>fa){t.repeat.x=fa/ia;t.offset.x=(1-t.repeat.x)/2;} else {t.repeat.y=ia/fa;t.offset.y=(1-t.repeat.y)/2;}
   photoMat.map=t;photoMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.photo));
@@ -275,12 +303,12 @@ const frontMat=mp(0xffffff,.3,{map:tex(cv(256,256,(x)=>{         // dibujo de re
   const g=x.createLinearGradient(0,0,0,256); g.addColorStop(0,'#7fa6d6'); g.addColorStop(.55,'#f1e3b5'); g.addColorStop(1,'#2c3e6b');
   x.fillStyle=g; x.fillRect(0,0,256,256); x.fillStyle='#2a3b6e'; x.beginPath(); x.moveTo(0,200);
   [[30,140],[60,170],[100,100],[140,160],[180,125],[220,165],[256,150],[256,256],[0,256]].forEach(p=>x.lineTo(p[0],p[1])); x.fill();}))});
-new T.TextureLoader().load(CONFIG.cover,t=>{sharp(t); frontMat.map=t;frontMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.cover));
+new T.TextureLoader().load(CONFIG.cover,t=>{sharp(t);frontMat.map=t;frontMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.cover));
 const backMat=mp(0xffffff,.35,{map:tex(cv(512,512,(x,w,h)=>{       // respaldo si falta contraportada.jpg
   x.fillStyle='#1c2740'; x.fillRect(0,0,w,h); x.fillStyle='#e8e0cf';
   x.font='bold 64px Georgia,serif'; x.fillText('ye',40,90); x.font='26px Georgia,serif';
   SONGS.forEach((s,i)=>x.fillText(`${i+1}. ${s}`,40,160+i*46));}))});
-new T.TextureLoader().load(CONFIG.backCover,t=>{ sharp(t); backMat.map=t;backMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.backCover));
+new T.TextureLoader().load(CONFIG.backCover,t=>{sharp(t);backMat.map=t;backMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.backCover));
 const edgeMat=mm(0xd8d2c4,.55);
 const coverG=new T.Group(); scene.add(coverG);
 add(new T.BoxGeometry(CS,CT,CS),[edgeMat,edgeMat,frontMat,backMat,edgeMat,edgeMat],0,0,0,true,coverG);
@@ -475,21 +503,60 @@ outBtn.onclick=()=>{
   say('Disco fuera. Arrástralo al tocadiscos o guárdalo otra vez.');
 };
 
-/* ================= 12. AUDIO ================= */
-const audio=new Audio();
+/* ================= 12. AUDIO (se descarga todo al abrir) ================= */
+const audio=new Audio(); audio.preload='auto';
+const urls=[];                                           // una dirección lista por canción
+function loadTrack(i,tries=0){
+  fetch(CONFIG.tracks[i]).then(r=>{if(!r.ok)throw 0;return r.blob();})
+    .then(b=>{urls[i]=URL.createObjectURL(b); if(playIdx===i&&!playing) play(i);})   // si la tocaste mientras cargaba, suena sola
+    .catch(()=>{ if(tries<4) setTimeout(()=>loadTrack(i,tries+1),1500*(tries+1)); else urls[i]=CONFIG.tracks[i]; });
+}
+CONFIG.tracks.forEach((_,i)=>loadTrack(i));
+
 function highlight(i){shards.forEach((s,j)=>{s.faceMat.emissive.setHex(j===i?hex(TINT[j]):0);s.faceMat.emissiveIntensity=.55;});}
 const hint=()=>noteOn?' · Toca la nota para verla de cerca':'';
 function play(i){
-  playIdx=i; highlight(i); audio.src=trackUrl(i);
+  playIdx=i; highlight(i);
+  if(!urls[i]){say(`Cargando "${SONGS[i]}"…`+hint());return;}   // arranca sola cuando termine de cargar
+  if(audio.dataset.i!==String(i)){audio.src=urls[i];audio.dataset.i=String(i);} else audio.currentTime=0;
   audio.play().then(()=>{playing=true;say(`▶ ${i+1}. ${SONGS[i]}`+hint());})
-    .catch(()=>say(`Falta el archivo ${trackUrl(i)}`+hint()));
+    .catch(err=>{
+      if(err.name==='AbortError') return;                         // se interrumpió a propósito: no es un error
+      say(err.name==='NotAllowedError'?'Toca de nuevo para activar el sonido':`No se pudo reproducir ${CONFIG.tracks[i]}`);
+    });
 }
 function stopPlay(){audio.pause();playing=false;playIdx=-1;highlight(-1);}
 audio.addEventListener('ended',()=>{                      // pasa sola a la siguiente canción
   if(disc&&disc.parked==='tt'&&playIdx>=0&&playIdx<N-1) play(playIdx+1); else stopPlay();
 });
 
-/* ================= 13. LOOP (optimizado) ================= */
+/* ================= 13. PANTALLA COMPLETA (Jugar / ✕) ================= */
+const startEl=document.getElementById('start'), fsBtn=document.getElementById('fsBtn');
+const root=document.documentElement;
+const reqFS=root.requestFullscreen||root.webkitRequestFullscreen;
+const exitFS=document.exitFullscreen||document.webkitExitFullscreen;
+const inFS=()=>!!(document.fullscreenElement||document.webkitFullscreenElement);
+function unlockAudio(){                                   // el primer toque "desbloquea" el sonido en la tablet
+  try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();ac.resume();}catch(e){}
+  audio.src='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+  audio.dataset.i='';
+  audio.play().then(()=>audio.pause()).catch(()=>{});
+}
+function enterFS(){ if(reqFS){try{const r=reqFS.call(root);if(r&&r.catch)r.catch(()=>{});}catch(e){}} }
+function updateFsBtn(){
+  if(!reqFS){fsBtn.style.display='none';return;}           // iPhone: no existe pantalla completa (ver nota)
+  fsBtn.style.display='block';
+  fsBtn.textContent=inFS()?'✕':'⛶';
+  fsBtn.setAttribute('aria-label',inFS()?'Salir de pantalla completa':'Pantalla completa');
+}
+document.getElementById('go').onclick=()=>{ unlockAudio(); startEl.style.display='none'; enterFS(); updateFsBtn(); };
+fsBtn.onclick=()=>{ if(inFS()){ if(exitFS)exitFS.call(document); } else enterFS(); };
+['fullscreenchange','webkitfullscreenchange'].forEach(ev=>document.addEventListener(ev,()=>{
+  updateFsBtn(); resize(); setTimeout(resize,250);         // reajusta la cámara al cambiar el tamaño
+}));
+fsBtn.addEventListener('pointerdown',e=>e.stopPropagation());
+
+/* ================= 14. LOOP (optimizado) ================= */
 let last=performance.now(), lastR=0, frame=0, fAcc=0, fN=0;
 function loop(){
   requestAnimationFrame(loop);
@@ -498,11 +565,11 @@ function loop(){
   const dt=Math.min((now-last)/1000,.05); last=now;
   frame++;
   renderer.shadowMap.needsUpdate=(frame%2===0);        // sombras cada 2 cuadros
-  if(frame>90){                                        // resolución adaptativa: baja sola si hay lag
+  if(frame>90){                                        // resolución adaptativa: baja solo si va realmente mal
     fAcc+=dt; fN++;
     if(fN>=45){
       const avg=fAcc/fN; fAcc=0; fN=0;
-      if(avg>.026&&pr>.7){pr=Math.max(.7,pr-.15);renderer.setPixelRatio(pr);renderer.setSize(innerWidth,innerHeight);}
+      if(avg>.034&&pr>1){pr=Math.max(1,pr-.25);renderer.setPixelRatio(pr);renderer.setSize(innerWidth,innerHeight);}
     }
   }
 
