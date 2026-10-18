@@ -6,7 +6,8 @@
 <title>El vinilo roto</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#241c2e;
-    font-family:"Trebuchet MS",system-ui,sans-serif;-webkit-user-select:none;user-select:none}
+    font-family:"Trebuchet MS",system-ui,sans-serif;-webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent}
   canvas{display:block;touch-action:none}
   #vig{position:fixed;inset:0;pointer-events:none;
     background:radial-gradient(ellipse at center,transparent 55%,rgba(10,5,20,.55))}
@@ -14,7 +15,7 @@
     padding:0 16px 16px;pointer-events:none}
   #msg{background:#3a2f4acc;color:#ffe9d2;border-radius:20px;padding:10px 20px;
     font-size:17px;text-align:center;max-width:90vw}
-    #out{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;display:none;font:inherit;font-size:16px;
+  #out{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;display:none;font:inherit;font-size:16px;
     padding:10px 20px;border:0;border-radius:16px;background:#ffb36b;color:#2b2033}
 </style>
 </head>
@@ -30,13 +31,14 @@ const T=THREE;
 /* ======== CONFIG: aquí personalizas TODO ======== */
 const CONFIG={
   cover:'portada.jpg',                       // portada del álbum
-  photo:'foto.jpg', 
-  backCover:'contraportada.jpg',             // parte de atrás del álbum                         // foto del cuadro de la mesa
+  backCover:'contraportada.jpg',             // parte de atrás del álbum
+  photo:'foto.jpg',                          // foto del cuadro de la mesa
   tracks:['tracks/1.mp3','tracks/2.mp3','tracks/3.mp3','tracks/4.mp3',
           'tracks/5.mp3','tracks/6.mp3','tracks/7.mp3'],   // trozo 1..7
   songs:["I Thought About Killing You","Yikes","All Mine","Wouldn't Leave",
          "No Mistakes","Ghost Town","Violent Crimes"],     // nombres que se muestran
-  noteText:["Feliz cumple mi vida","estoy muy orgulloso de ti,","te amo más que kanye loves kanye,","eres el amor de mi vida","nunca dejará de sonar ghost town"],
+  noteText:["Feliz cumple mi vida","estoy muy orgulloso de ti,","te amo más que kanye loves kanye,",
+            "eres el amor de mi vida,","prometo que nunca","dejará de sonar ghost town"],
   noteTrack:5                                // canción al voltear la portada (0=primera, 5=Ghost Town)
 };
 const SONGS=CONFIG.songs, trackUrl=i=>CONFIG.tracks[i];
@@ -46,7 +48,7 @@ const N=7, R=2.05, H=.14, BEV=.015, HH=(H+2*BEV)/2, STEP=Math.PI/4;
 const DISC=new T.Vector3(0,0,.4);            // dónde se arma el disco
 const TT=new T.Vector3(5.8,0,-3.2);          // tocadiscos
 const PLAT=new T.Vector3(5.3,1.14,-3.2);     // plato del tocadiscos
-const CS=4.4, CT=.12;                       // tamaño y grosor de la portada
+const CS=4.4, CT=.12;                        // tamaño y grosor de la portada
 const NOTE_TEXT=CONFIG.noteText;
 let phase='puzzle',placed=0,glued=0,polish=0,playing=false,playIdx=-1,disc=null,drag=null,noteOn=false,zoom=false;
 const hex=c=>parseInt(c.slice(1),16), cl=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -57,23 +59,25 @@ const msg=document.getElementById('msg'), say=t=>{if(msg.textContent!==t)msg.tex
 const scene=new T.Scene();
 scene.background=new T.Color(0x241c2e);
 scene.fog=new T.Fog(0x241c2e,26,55);
-const cam=new T.PerspectiveCamera(45,1,.1,100);
+const cam=new T.PerspectiveCamera(45,1,.5,200);
+let pr=Math.min(devicePixelRatio,2);                       // resolución (baja sola si hay lag)
 const renderer=new T.WebGLRenderer({antialias:devicePixelRatio<2,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.setPixelRatio(pr);
 renderer.shadowMap.enabled=true; renderer.shadowMap.type=T.PCFShadowMap;
+renderer.shadowMap.autoUpdate=false;                         // las sombras se actualizan en el loop
 renderer.toneMapping=T.ACESFilmicToneMapping; renderer.toneMappingExposure=.95;
 document.body.appendChild(renderer.domElement);
+
 const camHome=new T.Vector3(), lookHome=new T.Vector3(0,.8,-.5), lookNow=lookHome.clone(), _g=new T.Vector3(), _l=new T.Vector3();
 let zoomK=1;
-// puntos que SIEMPRE deben verse: esquinas de la mesa, cuadro, lámpara, planta, pared
-// la cámara solo encuadra lo esencial: tapete, cuadro (esquina derecha), lámpara, planta, tocadiscos
+// la cámara solo encuadra lo esencial: tapete, cuadro, tocadiscos
 const fitPts=[[-7.3,0,5.2],[7.3,0,5.2],[7.7,0,5.4],[7.5,2.5,4.4],[-7.3,0,-4.2]]
   .map(p=>new T.Vector3(p[0],p[1],p[2]));
 const topPt=new T.Vector3(1.5,4.8,-8.3);        // borde de arriba de la ventana
 const camDir=new T.Vector3(0,9.5,11.5), _p=new T.Vector3();
 function resize(){
   const w=innerWidth,h=innerHeight,a=w/h;
-  renderer.setSize(w,h); cam.aspect=a; cam.far=200; cam.updateProjectionMatrix();
+  renderer.setSize(w,h); cam.aspect=a; cam.updateProjectionMatrix();
   zoomK=Math.max(1,1.1/a);
   lookHome.set(0,.8,-.5);
   for(let s=.8;s<4.5;s+=.04){                   // 1) aleja hasta que entren los lados y el tapete
@@ -91,22 +95,28 @@ function resize(){
 }
 addEventListener('resize',resize); resize();
 cam.position.copy(camHome);
+
 scene.add(new T.HemisphereLight(0x9fb0ff,0x5a3d2b,.4));
 const sun=new T.DirectionalLight(0xffd9a8,.7);
 sun.position.set(-5,14,7); sun.castShadow=true; sun.shadow.mapSize.set(1024,1024); sun.shadow.bias=-.0005;
 Object.assign(sun.shadow.camera,{left:-12,right:12,top:12,bottom:-12});
 scene.add(sun);
 const lampLight=new T.PointLight(0xffb36b,.9,26,1.5); lampLight.position.set(-8,3.2,-6); scene.add(lampLight);
-const gloss=new T.PointLight(0xffffff,.4,40,2); gloss.position.set(-4,8,6); scene.add(gloss);
+const gloss=new T.PointLight(0xffffff,.4,40,2); gloss.position.set(-4,8,6); scene.add(gloss);   // reflejo en la portada
 
 /* ================= 3. AYUDANTES ================= */
-const mm=(c,r,o={})=>new T.MeshPhysicalMaterial(Object.assign({color:c,roughness:r,clearcoat:1,clearcoatRoughness:.12},o));
+// mm = material normal (ligero) · mp = material con barniz brillante (solo la portada)
+const mm=(c,r=.6,o={})=>new T.MeshStandardMaterial(Object.assign({color:c,roughness:r},o));
+const mp=(c,r=.3,o={})=>new T.MeshPhysicalMaterial(Object.assign({color:c,roughness:r,clearcoat:1,clearcoatRoughness:.12},o));
 function add(geo,mat,x,y,z,cast=true,parent=scene){
   const m=new T.Mesh(geo,mat); m.position.set(x,y,z); m.castShadow=cast; m.receiveShadow=true; parent.add(m); return m;
 }
 function shadows(g){g.traverse(o=>{if(o.isMesh){o.castShadow=o.receiveShadow=true;}});return g;}
 function cv(w,h,draw){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);return c;}
 function tex(c,rep){const t=new T.CanvasTexture(c);if(rep){t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(rep[0],rep[1]);}t.anisotropy=2;return t;}
+const MAXANI=renderer.capabilities.getMaxAnisotropy();
+function sharp(t){t.anisotropy=MAXANI;t.minFilter=T.LinearMipmapLinearFilter;t.magFilter=T.LinearFilter;return t;}
+
 // caja redondeada (en vez de cubos duros)
 function rbox(w,h,d,r=.15,bev=.05){
   const s=new T.Shape(),x=-w/2,y=-d/2;
@@ -136,7 +146,6 @@ ground.quaternion.setFromAxisAngle(new CANNON.Vec3(1,0,0),-Math.PI/2);
 ground.collisionFilterGroup=1; ground.collisionFilterMask=-1; world.addBody(ground);
 staticBox(.5,6,9,11,0,0); staticBox(.5,6,9,-11,0,0); staticBox(11,6,.5,0,0,-8); staticBox(11,6,.5,0,0,8);
 staticBox(2.9,.45,2.6,TT.x,.45,TT.z);                       // base del tocadiscos
-// grupos: trozos solo chocan con la mesa; objetos chocan entre sí
 function mkBody(hx,hy,hz,x,y,z,grp,mask){
   const b=new CANNON.Body({mass:1,material:pm,linearDamping:.6});
   b.addShape(new CANNON.Box(new CANNON.Vec3(hx,hy,hz))); b.position.set(x,y,z);
@@ -145,7 +154,7 @@ function mkBody(hx,hy,hz,x,y,z,grp,mask){
 }
 const props=[];
 function makeProp(mesh,kind,hx,hy,hz,x,y,z){
-  const b=mkBody(hx,hy,hz,x,y,z,kind==='shard'?2:4,kind==='shard'?1:5);
+  const b=mkBody(hx,hy,hz,x,y,z,2,-1);      // todos chocan con todo
   const p={mesh,kind,body:b,active:true,yaw:0,yawT:0,flip:0,flipT:0,parked:null};
   mesh.userData.prop=p; props.push(p); return p;
 }
@@ -171,23 +180,25 @@ const ginT=tex(cv(128,128,x=>{
   for(let i=0;i<4;i++){x.fillRect(i*32,0,16,128);x.fillRect(0,i*32,128,16);}}),[1.2,1.2]);
 
 function vinylTex(tint,dirty){      // surcos + etiqueta verde; "sucio" lleva polvo y rayones
-  const t=tex(cv(512,512,(x,S)=>{
-    const k=S/(2*R);
-    x.fillStyle=dirty?'#2a2830':'#101015'; x.fillRect(0,0,S,S);
+  const S=dirty?384:512;
+  const t=tex(cv(S,S,(x,W)=>{
+    const k=W/(2*R);
+    x.fillStyle=dirty?'#2a2830':'#101015'; x.fillRect(0,0,W,W);
     for(let r=.95;r<R-.04;r+=.045){
       x.strokeStyle=dirty?tint+'99':`rgba(255,255,255,${.04+Math.random()*.05})`;
-      x.lineWidth=1; x.beginPath(); x.arc(S/2,S/2,r*k,0,7); x.stroke();
+      x.lineWidth=1; x.beginPath(); x.arc(W/2,W/2,r*k,0,7); x.stroke();
     }
-    x.fillStyle='#9be564'; x.beginPath(); x.arc(S/2,S/2,.78*k,0,7); x.fill();
-    x.strokeStyle='#6fb344'; x.lineWidth=3; x.beginPath(); x.arc(S/2,S/2,.6*k,0,7); x.stroke();
-    x.fillStyle='#101015'; x.beginPath(); x.arc(S/2,S/2,.07*k,0,7); x.fill();
+    x.fillStyle='#9be564'; x.beginPath(); x.arc(W/2,W/2,.78*k,0,7); x.fill();
+    x.strokeStyle='#6fb344'; x.lineWidth=3; x.beginPath(); x.arc(W/2,W/2,.6*k,0,7); x.stroke();
+    x.fillStyle='#101015'; x.beginPath(); x.arc(W/2,W/2,.07*k,0,7); x.fill();
     if(dirty){
-      for(let i=0;i<140;i++){x.fillStyle=`rgba(200,190,180,${Math.random()*.12})`;x.beginPath();x.arc(Math.random()*S,Math.random()*S,Math.random()*9,0,7);x.fill();}
+      for(let i=0;i<140;i++){x.fillStyle=`rgba(200,190,180,${Math.random()*.12})`;x.beginPath();x.arc(Math.random()*W,Math.random()*W,Math.random()*9,0,7);x.fill();}
       for(let i=0;i<30;i++){x.strokeStyle=`rgba(255,255,255,${.1+Math.random()*.25})`;x.lineWidth=1;x.beginPath();
-        const a=Math.random()*S,b=Math.random()*S;x.moveTo(a,b);x.lineTo(a+Math.random()*90-45,b+Math.random()*90-45);x.stroke();}
+        const a=Math.random()*W,b=Math.random()*W;x.moveTo(a,b);x.lineTo(a+Math.random()*90-45,b+Math.random()*90-45);x.stroke();}
     }}));
   t.repeat.set(1/(2*R),1/(2*R)); t.offset.set(.5,.5); return t;
 }
+const cleanTex=vinylTex('#000000',false);        // una sola textura limpia compartida por los 7 trozos
 
 /* ================= 6. AMBIENTE ================= */
 const table=add(new T.BoxGeometry(22,.6,16),mm(0xffffff,.8,{map:woodT}),0,-.3,0,false);
@@ -217,6 +228,7 @@ const dp=new Float32Array(90*3); for(let i=0;i<dp.length;i+=3){dp[i]=Math.random
 const dg=new T.BufferGeometry(); dg.setAttribute('position',new T.BufferAttribute(dp,3));
 const dust=new T.Points(dg,new T.PointsMaterial({color:0xffd9a8,size:.07,transparent:true,opacity:.55,depthWrite:false})); scene.add(dust);
 
+// contorno discreto de dónde va el vinilo
 const guide=new T.Mesh(new T.PlaneGeometry(2*R+.1,2*R+.1),new T.MeshBasicMaterial({
   map:tex(cv(512,512,(x,w)=>{x.strokeStyle=x.fillStyle='#f1d9a8';x.lineWidth=6;x.setLineDash([22,16]);
     x.beginPath();x.arc(w/2,w/2,w/2-8,0,7);x.stroke();x.setLineDash([]);x.beginPath();x.arc(w/2,w/2,9,0,7);x.fill();})),
@@ -234,8 +246,8 @@ const photoMat=new T.MeshBasicMaterial({color:0xe6e6e6,map:tex(cv(256,256,(x,w,h
   x.fillStyle='#f7c6d6';x.fillRect(0,0,w,h);x.fillStyle='#e0527a';x.font='120px sans-serif';
   x.textAlign='center';x.fillText('♥',w/2,150);x.font='24px sans-serif';x.fillText('Pon tu foto aquí',w/2,205);}))});
 add(new T.PlaneGeometry(PW,PH),photoMat,0,FH/2+.05,.122,false,lean);
-add(new T.BoxGeometry(.14,FH*.7,.08),woodM,0,FH*.35,-.4,true,frameG).rotation.x=-.35;  // pata, detrás del cuadro  // pata
-new T.TextureLoader().load(CONFIG.photo,t=>{                  // recorta tu foto para que llene el cuadro
+add(new T.BoxGeometry(.14,FH*.7,.08),woodM,0,FH*.35,-.4,true,frameG).rotation.x=-.35;  // pata, detrás del cuadro
+new T.TextureLoader().load(CONFIG.photo,t=>{  sharp(t);                // recorta tu foto para que llene el cuadro
   const fa=PW/PH, ia=t.image.width/t.image.height;
   if(ia>fa){t.repeat.x=fa/ia;t.offset.x=(1-t.repeat.x)/2;} else {t.repeat.y=ia/fa;t.offset.y=(1-t.repeat.y)/2;}
   photoMat.map=t;photoMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.photo));
@@ -259,30 +271,50 @@ const bar=add(new T.CylinderGeometry(.04,.04,2.4,8),mm(0xd9d9e0,.3,{metalness:.8
 add(rbox(.25,.1,.4,.04,.02),mm(0x2b2033),0,.1,2.4,true,arm);
 
 /* ================= 8. PORTADA (la real: portada.jpg) ================= */
-const frontMat=mm(0xffffff,.3,{map:tex(cv(256,256,(x)=>{         // dibujo de respaldo si falta portada.jpg
+const frontMat=mp(0xffffff,.3,{map:tex(cv(256,256,(x)=>{         // dibujo de respaldo si falta portada.jpg
   const g=x.createLinearGradient(0,0,0,256); g.addColorStop(0,'#7fa6d6'); g.addColorStop(.55,'#f1e3b5'); g.addColorStop(1,'#2c3e6b');
   x.fillStyle=g; x.fillRect(0,0,256,256); x.fillStyle='#2a3b6e'; x.beginPath(); x.moveTo(0,200);
   [[30,140],[60,170],[100,100],[140,160],[180,125],[220,165],[256,150],[256,256],[0,256]].forEach(p=>x.lineTo(p[0],p[1])); x.fill();}))});
-new T.TextureLoader().load(CONFIG.cover,t=>{frontMat.map=t;frontMat.needsUpdate=true;},undefined,()=>console.warn('Falta portada.jpg'));
-const backMat=mm(0xffffff,.35,{map:tex(cv(512,512,(x,w,h)=>{
+new T.TextureLoader().load(CONFIG.cover,t=>{sharp(t); frontMat.map=t;frontMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.cover));
+const backMat=mp(0xffffff,.35,{map:tex(cv(512,512,(x,w,h)=>{       // respaldo si falta contraportada.jpg
   x.fillStyle='#1c2740'; x.fillRect(0,0,w,h); x.fillStyle='#e8e0cf';
   x.font='bold 64px Georgia,serif'; x.fillText('ye',40,90); x.font='26px Georgia,serif';
   SONGS.forEach((s,i)=>x.fillText(`${i+1}. ${s}`,40,160+i*46));}))});
-const edgeMat=mm(0xd8d2c4,.55);  
-new T.TextureLoader().load(CONFIG.backCover,t=>{backMat.map=t;backMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.backCover));
+new T.TextureLoader().load(CONFIG.backCover,t=>{ sharp(t); backMat.map=t;backMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.backCover));
+const edgeMat=mm(0xd8d2c4,.55);
 const coverG=new T.Group(); scene.add(coverG);
 add(new T.BoxGeometry(CS,CT,CS),[edgeMat,edgeMat,frontMat,backMat,edgeMat,edgeMat],0,0,0,true,coverG);
+
 // nota pegada atrás (aparece al voltear la portada con el disco dentro)
 const noteG=new T.Group(); noteG.position.set(.8,-CT/2-.004,-.8); noteG.rotation.y=.12; coverG.add(noteG);
-const note=new T.Mesh(new T.PlaneGeometry(1.9,1.9),mm(0xffffff,.9,{map:tex(cv(512,512,(x,w,h)=>{
-  x.fillStyle='#fff3a8'; x.fillRect(0,0,w,h); x.fillStyle='#4a3a6a';
-  x.font='46px "Segoe Print","Bradley Hand","Comic Sans MS",cursive'; x.textAlign='center';
-  NOTE_TEXT.forEach((l,i)=>x.fillText(l,w/2,100+i*66)); x.font='60px sans-serif'; x.fillStyle='#e0527a'; x.fillText('♥',w/2,455);}))}));
+function noteTex(){                                  // el texto se acomoda solo en el papel
+  return tex(cv(1024,1024,(x,w,h)=>{
+    x.fillStyle='#fff3a8'; x.fillRect(0,0,w,h);
+    const pad=90, maxW=w-2*pad, maxH=h-2*pad-110;
+    const family='"Segoe Print","Bradley Hand","Comic Sans MS",cursive';
+    const words=NOTE_TEXT.join(' ').split(/\s+/);
+    let size=100, lines;
+    for(;size>=28;size-=2){
+      x.font=`${size}px ${family}`; lines=[]; let cur='';
+      for(const wd of words){
+        const t=cur?cur+' '+wd:wd;
+        if(x.measureText(t).width>maxW&&cur){lines.push(cur);cur=wd;} else cur=t;
+      }
+      lines.push(cur);
+      if(lines.length*size*1.3<=maxH) break;
+    }
+    x.fillStyle='#4a3a6a'; x.textAlign='center'; x.textBaseline='top';
+    let y=pad+(maxH-lines.length*size*1.3)/2+20;
+    lines.forEach(l=>{x.fillText(l,w/2,y);y+=size*1.3;});
+    x.font='90px sans-serif'; x.fillStyle='#e0527a'; x.textBaseline='alphabetic'; x.fillText('♥',w/2,h-pad);
+  }));
+}
+const note=new T.Mesh(new T.PlaneGeometry(2.4,2.4),mm(0xffffff,.9,{map:noteTex()}));
 note.rotation.x=Math.PI/2; noteG.add(note);
 const tape=new T.Mesh(new T.PlaneGeometry(.7,.25),new T.MeshBasicMaterial({color:0xf4e9c8,transparent:true,opacity:.75}));
-tape.rotation.x=Math.PI/2; tape.position.set(0,-.003,.95); noteG.add(tape);
+tape.rotation.x=Math.PI/2; tape.position.set(0,-.003,1.2); noteG.add(tape);
 noteG.scale.setScalar(.001); noteG.visible=false;
-const cover=makeProp(coverG,'cover',CS/2,CT/2,CS/2,-5.6,.2,-3.2); cover.sleeved=false;      // todos chocan con todo
+const cover=makeProp(coverG,'cover',CS/2,CT/2,CS/2,-5.6,.2,-3.2); cover.sleeved=false;
 
 /* ================= 9. HERRAMIENTAS (con carita) ================= */
 const glueG=new T.Group();
@@ -293,7 +325,7 @@ add(new T.ConeGeometry(.17,.34,16),mm(0xff8a3d,.5),0,.85,0,true,glueG);
 [-.17,.17].forEach(x=>add(new T.SphereGeometry(.055,12,10),mm(0x2b2033,.3),x,-.15,.535,false,glueG));
 [-.3,.3].forEach(x=>{const c=add(new T.SphereGeometry(.07,10,8),mm(0xff6f91,.6),x,-.27,.52,false,glueG);c.scale.z=.3;});
 scene.add(glueG);
-const glue=makeProp(glueG,'glue',.5,.8,.5,-1.8,.9,-4.4); glue.kind='glue';
+const glue=makeProp(glueG,'glue',.5,.8,.5,-1.8,.9,-4.4);
 const clothG=new T.Group();
 add(rbox(1.7,.3,1.2,.2,.07),mm(0xffffff,.95,{map:ginT}),0,0,0,true,clothG);
 [-.2,.2].forEach(x=>add(new T.SphereGeometry(.045,10,8),mm(0x2b2033,.3),x,.12,.62,false,clothG));
@@ -323,7 +355,7 @@ for(let i=0;i<N;i++){
   g.rotateX(-Math.PI/2); g.computeBoundingBox();
   const bc=new T.Vector3(),sz=new T.Vector3(); g.boundingBox.getCenter(bc); g.boundingBox.getSize(sz);
   g.translate(-bc.x,-bc.y,-bc.z);
-  const dirty=vinylTex(TINT[i],true), clean=vinylTex(TINT[i],false);
+  const dirty=vinylTex(TINT[i],true), clean=cleanTex;
   const faceMat=mm(0xffffff,.8,{map:dirty,metalness:.05});
   const mesh=new T.Mesh(g,[faceMat,mm(0x17161c,.5)]); mesh.castShadow=mesh.receiveShadow=true; mesh.userData.i=i;
   const a=(10+i*26.7)*Math.PI/180;                                // en arco frente al tapete
@@ -341,6 +373,8 @@ say('Arrastra los 7 trozos al centro. Tócalos para girarlos (o toca con otro de
 const ray=new T.Raycaster(), ndc=new T.Vector2(), plane=new T.Plane(new T.Vector3(0,1,0),0), hit=new T.Vector3();
 function setRay(e){ndc.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);ray.setFromCamera(ndc,cam);}
 const isBack=p=>Math.round(p.flipT/Math.PI)%2!==0;
+const outBtn=document.getElementById('out');
+function setZoom(v){zoom=v;say(v?'Toca en cualquier parte para volver ♥':'Puedes seguir moviendo la portada.');}
 
 renderer.domElement.addEventListener('pointerdown',e=>{
   if(zoom){setZoom(false);return;}
@@ -357,8 +391,9 @@ renderer.domElement.addEventListener('pointerdown',e=>{
 addEventListener('pointermove',e=>{
   if(!drag||e.pointerId!==drag.pid) return;
   if(!drag.moved&&Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy)>8){
-    drag.moved=true; const p=drag.p; if(p===glue){p.flipT=2.7;blip(420,.06);}
-    if(p.parked){                                       // sacar el disco del tocadiscos
+    drag.moved=true; const p=drag.p;
+    if(p===glue){p.flipT=2.7;blip(420,.06);}                  // el pegamento se voltea al sujetarlo
+    if(p.parked){                                             // sacar el disco del tocadiscos
       p.parked=null; p.yaw=p.yawT=p.mesh.rotation.y;
       p.body.position.set(p.mesh.position.x,p.mesh.position.y,p.mesh.position.z);
       p.body.velocity.set(0,0,0); world.addBody(p.body); stopPlay();
@@ -381,12 +416,13 @@ function tap(p,obj){
   else if(p.kind==='disc'){
     if(p.parked==='tt'&&obj.userData.i!==undefined) play(obj.userData.i);
     else say('Arrastra el disco al tocadiscos o a su portada.');
-    
-  } 
-    else if(p===cover&&noteOn){setZoom(true);}
-  else if(p===glue){say('Mantén el pegamento y arrástralo sobre las grietas.');} else {p.flipT+=Math.PI;p.body.velocity.y=6;blip(300,.08);}                    // ¡voltear!
+  }
+  else if(p===cover&&noteOn){setZoom(true);}
+  else if(p===glue){say('Mantén el pegamento y arrástralo sobre las grietas.');}
+  else {p.flipT+=Math.PI;p.body.velocity.y=6;blip(300,.08);}                    // ¡voltear!
 }
-function release(p){ if(p===glue) p.flipT=0;
+function release(p){
+  if(p===glue) p.flipT=0;
   const b=p.body;
   if(p.kind==='shard'){
     const s=p.shard;
@@ -420,8 +456,6 @@ function parkDisc(){
   world.removeBody(disc.body); disc.parked='tt'; disc.parkPos=PLAT.clone();
   disc.mesh.rotation.set(0,disc.yaw,0); blip(560,.2); say('Toca un trozo del disco para escuchar su canción.');
 }
-const outBtn=document.getElementById('out');
-function setZoom(v){zoom=v;say(v?'Toca en cualquier parte para volver ♥':'Puedes seguir moviendo la portada.');}
 function sleeveDisc(){
   world.removeBody(disc.body); disc.active=false; disc.parked=null; cover.sleeved=true; stopPlay();
   coverG.add(disc.mesh); disc.mesh.position.set(1,0,0); disc.mesh.rotation.set(0,0,0); disc.mesh.scale.set(1,.5,1);
@@ -446,18 +480,31 @@ const audio=new Audio();
 function highlight(i){shards.forEach((s,j)=>{s.faceMat.emissive.setHex(j===i?hex(TINT[j]):0);s.faceMat.emissiveIntensity=.55;});}
 const hint=()=>noteOn?' · Toca la nota para verla de cerca':'';
 function play(i){
-    
   playIdx=i; highlight(i); audio.src=trackUrl(i);
   audio.play().then(()=>{playing=true;say(`▶ ${i+1}. ${SONGS[i]}`+hint());})
     .catch(()=>say(`Falta el archivo ${trackUrl(i)}`+hint()));
 }
 function stopPlay(){audio.pause();playing=false;playIdx=-1;highlight(-1);}
+audio.addEventListener('ended',()=>{                      // pasa sola a la siguiente canción
+  if(disc&&disc.parked==='tt'&&playIdx>=0&&playIdx<N-1) play(playIdx+1); else stopPlay();
+});
 
-/* ================= 13. LOOP ================= */
-let last=performance.now();
+/* ================= 13. LOOP (optimizado) ================= */
+let last=performance.now(), lastR=0, frame=0, fAcc=0, fN=0;
 function loop(){
   requestAnimationFrame(loop);
-  const now=performance.now(), dt=Math.min((now-last)/1000,.05); last=now;
+  const now=performance.now();
+  if(now-lastR<12) return; lastR=now;                  // máximo ~60 fps (pantallas de 120 Hz)
+  const dt=Math.min((now-last)/1000,.05); last=now;
+  frame++;
+  renderer.shadowMap.needsUpdate=(frame%2===0);        // sombras cada 2 cuadros
+  if(frame>90){                                        // resolución adaptativa: baja sola si hay lag
+    fAcc+=dt; fN++;
+    if(fN>=45){
+      const avg=fAcc/fN; fAcc=0; fN=0;
+      if(avg>.026&&pr>.7){pr=Math.max(.7,pr-.15);renderer.setPixelRatio(pr);renderer.setSize(innerWidth,innerHeight);}
+    }
+  }
 
   // el dedo "tira" del objeto sostenido
   if(drag&&drag.moved){
@@ -490,24 +537,25 @@ function loop(){
     const q=p.mesh.quaternion; b.quaternion.set(q.x,q.y,q.z,q.w);
   }
   // trozos ya colocados
-  shards.forEach(s=>{
-    if(!s.snapped||s.inDisc) return;
+  for(const s of shards){
+    if(!s.snapped||s.inDisc) continue;
     s.mesh.position.lerp(s.target,.25);
     s.mesh.rotation.y+=(s.prop.yawT-s.mesh.rotation.y)*.25;
     const sc=s.glued?1:.975; s.mesh.scale.x+=(sc-s.mesh.scale.x)*.2; s.mesh.scale.z=s.mesh.scale.x;
-  });
+  }
   // brazo del tocadiscos
   const armT=(playing&&disc&&disc.parked==='tt')?-.57:0; arm.rotation.y+=(armT-arm.rotation.y)*.05;
   // nota atrás de la portada
   const back=isBack(cover);
-  if(cover.sleeved&&back&&!noteOn){noteOn=true;play(CONFIG.noteTrack);blip(700,.2);}          // Ghost Town = pista 6
+  if(cover.sleeved&&back&&!noteOn){noteOn=true;play(CONFIG.noteTrack);blip(700,.2);}
   if(noteOn&&(!back||!cover.sleeved)){noteOn=false;stopPlay();}
   const ns=Math.max(.001,noteG.scale.x+((noteOn?1:.001)-noteG.scale.x)*.12);
   noteG.scale.setScalar(ns); noteG.visible=ns>.02;
   dust.rotation.y+=.0004;
-    if(zoom&&!noteOn) zoom=false;
+  // cámara (y zoom a la nota)
+  if(zoom&&!noteOn) zoom=false;
   const cp=cover.mesh.position;
-  const goal=zoom?_g.set(cp.x,cp.y+6.2*zoomK,cp.z+2.6*zoomK):camHome;
+  const goal=zoom?_g.set(cp.x,cp.y+5.2*zoomK,cp.z+2.2*zoomK):camHome;
   const look=zoom?_l.set(cp.x,cp.y,cp.z):lookHome;
   cam.position.lerp(goal,.08); lookNow.lerp(look,.08); cam.lookAt(lookNow);
   renderer.render(scene,cam);
