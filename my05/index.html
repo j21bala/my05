@@ -51,24 +51,43 @@ const NOTE_TEXT=CONFIG.noteText;
 let phase='puzzle',placed=0,glued=0,polish=0,playing=false,playIdx=-1,disc=null,drag=null,noteOn=false,zoom=false;
 const hex=c=>parseInt(c.slice(1),16), cl=(v,a,b)=>Math.max(a,Math.min(b,v));
 const wrapPi=a=>((a+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
-const msg=document.getElementById('msg'), say=t=>msg.textContent=t;
+const msg=document.getElementById('msg'), say=t=>{if(msg.textContent!==t)msg.textContent=t;};
 
 /* ================= 2. ESCENA, CÁMARA, LUCES ================= */
 const scene=new T.Scene();
 scene.background=new T.Color(0x241c2e);
 scene.fog=new T.Fog(0x241c2e,26,55);
 const cam=new T.PerspectiveCamera(45,1,.1,100);
-const renderer=new T.WebGLRenderer({antialias:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));
-renderer.shadowMap.enabled=true; renderer.shadowMap.type=T.PCFSoftShadowMap;
+const renderer=new T.WebGLRenderer({antialias:devicePixelRatio<2,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=T.PCFShadowMap;
 renderer.toneMapping=T.ACESFilmicToneMapping; renderer.toneMappingExposure=.95;
 document.body.appendChild(renderer.domElement);
 const camHome=new T.Vector3(), lookHome=new T.Vector3(0,.8,-.5), lookNow=lookHome.clone(), _g=new T.Vector3(), _l=new T.Vector3();
 let zoomK=1;
+// puntos que SIEMPRE deben verse: esquinas de la mesa, cuadro, lámpara, planta, pared
+// la cámara solo encuadra lo esencial: tapete, cuadro (esquina derecha), lámpara, planta, tocadiscos
+const fitPts=[[-7.3,0,5.2],[7.3,0,5.2],[7.7,0,5.4],[7.5,2.5,4.4],[-7.3,0,-4.2]]
+  .map(p=>new T.Vector3(p[0],p[1],p[2]));
+const topPt=new T.Vector3(1.5,4.8,-8.3);        // borde de arriba de la ventana
+const camDir=new T.Vector3(0,9.5,11.5), _p=new T.Vector3();
 function resize(){
-  const w=innerWidth,h=innerHeight,a=w/h,s=Math.max(1,1.35/a);
-  renderer.setSize(w,h); cam.aspect=a; zoomK=Math.max(1,1.1/a);
-  camHome.set(0,9.5*s,11.5*s); cam.updateProjectionMatrix();
+  const w=innerWidth,h=innerHeight,a=w/h;
+  renderer.setSize(w,h); cam.aspect=a; cam.far=200; cam.updateProjectionMatrix();
+  zoomK=Math.max(1,1.1/a);
+  lookHome.set(0,.8,-.5);
+  for(let s=.8;s<4.5;s+=.04){                   // 1) aleja hasta que entren los lados y el tapete
+    camHome.copy(camDir).multiplyScalar(s);
+    cam.position.copy(camHome); cam.lookAt(lookHome); cam.updateMatrixWorld(true);
+    if(fitPts.every(p=>{_p.copy(p).project(cam);return Math.abs(_p.x)<.97&&_p.y<.97&&_p.y>-.88;})) break;
+  }
+  for(let i=0;i<40;i++){                        // 2) sube la imagen hasta que la ventana toque el borde de arriba
+    cam.lookAt(lookHome); cam.updateMatrixWorld(true);
+    if(_p.copy(topPt).project(cam).y>=.95) break;
+    lookHome.y-=.3;
+  }
+  lookNow.copy(lookHome);
+  const d=camHome.length(); scene.fog.near=d+12; scene.fog.far=d+40;
 }
 addEventListener('resize',resize); resize();
 cam.position.copy(camHome);
@@ -87,7 +106,7 @@ function add(geo,mat,x,y,z,cast=true,parent=scene){
 }
 function shadows(g){g.traverse(o=>{if(o.isMesh){o.castShadow=o.receiveShadow=true;}});return g;}
 function cv(w,h,draw){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);return c;}
-function tex(c,rep){const t=new T.CanvasTexture(c);if(rep){t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(rep[0],rep[1]);}t.anisotropy=4;return t;}
+function tex(c,rep){const t=new T.CanvasTexture(c);if(rep){t.wrapS=t.wrapT=T.RepeatWrapping;t.repeat.set(rep[0],rep[1]);}t.anisotropy=2;return t;}
 // caja redondeada (en vez de cubos duros)
 function rbox(w,h,d,r=.15,bev=.05){
   const s=new T.Shape(),x=-w/2,y=-d/2;
@@ -105,7 +124,7 @@ let ac; function blip(f=520,d=.12){try{
   o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime+d);}catch(e){}}
 
 /* ================= 4. FÍSICA (cannon.js) ================= */
-const world=new CANNON.World(); world.gravity.set(0,-25,0); world.solver.iterations=8;
+const world=new CANNON.World(); world.gravity.set(0,-25,0); world.solver.iterations=5;
 const pm=new CANNON.Material('pm');
 world.addContactMaterial(new CANNON.ContactMaterial(pm,pm,{friction:.35,restitution:.12}));
 function staticBox(hx,hy,hz,x,y,z){
@@ -205,7 +224,7 @@ const guide=new T.Mesh(new T.PlaneGeometry(2*R+.1,2*R+.1),new T.MeshBasicMateria
 guide.rotation.x=-Math.PI/2; guide.position.set(DISC.x,.02,DISC.z); scene.add(guide);
 
 /* --- Cuadro con tu foto (decoración). Mueve FRAME para cambiarlo de sitio --- */
-const FRAME=new T.Vector3(8.3,0,3.4), FW=2.6, FH=3.3, PW=FW*.7, PH=FH*.72;
+const FRAME=new T.Vector3(6.4,0,4.6), FW=2.7, FH=2.1, PW=FW*.7, PH=FH*.72;
 const frameG=new T.Group(); frameG.position.set(FRAME.x,0,FRAME.z); frameG.rotation.y=-.35; scene.add(frameG);
 const lean=new T.Group(); lean.rotation.x=-.12; frameG.add(lean);        // inclinado hacia atrás
 const woodM=mm(0x6b4429,.55);
@@ -221,7 +240,7 @@ new T.TextureLoader().load(CONFIG.photo,t=>{                  // recorta tu foto
   if(ia>fa){t.repeat.x=fa/ia;t.offset.x=(1-t.repeat.x)/2;} else {t.repeat.y=ia/fa;t.offset.y=(1-t.repeat.y)/2;}
   photoMat.map=t;photoMat.needsUpdate=true;},undefined,()=>console.warn('Falta '+CONFIG.photo));
 /* --- Cuerpos sólidos de la decoración (nada los atraviesa) --- */
-staticBox(1.25,1.65,.8,FRAME.x,1.65,FRAME.z);   // cuadro
+staticBox(1.25,FH/2,.8,FRAME.x,FH/2,FRAME.z);   // cuadro
 staticBox(.7,.5,.7,-8,.5,-6);                   // base de la lámpara
 staticBox(.85,1.2,.85,8.4,1.2,-6.4);            // planta
 staticBox(.45,.3,.45,-1,.3,-6.4);               // taza
@@ -458,7 +477,7 @@ function loop(){
       if(polish>10) finish();
     }
   }
-  world.step(1/60,dt,3);
+  world.step(1/60,dt,2);
 
   // sincronizar físicas -> gráficos
   for(const p of props){
